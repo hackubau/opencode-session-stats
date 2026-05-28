@@ -89,6 +89,28 @@ def parse_tokens(raw: dict) -> TokenStats:
     )
 
 
+def effective_token_stats(raw: dict) -> TokenStats:
+    tokens = parse_tokens(raw)
+    exported_total = raw.get("total")
+
+    # OpenCode exports include cache read/write in tokens.total, while the
+    # report keeps TOTAL as billable/generated tokens only (input+output+reasoning).
+    # Do not force exported_total into TokenStats.total; preserve cache separately.
+    if tokens.total == 0 and isinstance(exported_total, int) and exported_total > 0:
+        cache_total = tokens.cache_read + tokens.cache_write
+        inferred_input = max(exported_total - cache_total, 0)
+        tokens.input = inferred_input
+
+    return tokens
+
+
+def aggregate_message_tokens(messages: list[MessageStats]) -> TokenStats:
+    total = TokenStats()
+    for message in messages:
+        total = total + message.tokens
+    return total
+
+
 def parse_session(data: dict) -> SessionStats:
     info = data.get("info", {})
     model = info.get("model", {})
@@ -99,7 +121,7 @@ def parse_session(data: dict) -> SessionStats:
         agent=info.get("agent", ""),
         model_id=model.get("id", model.get("modelID", "")),
         provider_id=model.get("providerID", ""),
-        session_tokens=parse_tokens(info.get("tokens", {})),
+        session_tokens=effective_token_stats(info.get("tokens", {})),
         session_cost=info.get("cost", 0.0),
     )
 
@@ -110,10 +132,16 @@ def parse_session(data: dict) -> SessionStats:
             role=msg_info.get("role", ""),
             model_id=msg_info.get("modelID"),
             provider_id=msg_info.get("providerID"),
-            tokens=parse_tokens(msg_info.get("tokens", {})),
+            tokens=effective_token_stats(msg_info.get("tokens", {})),
             cost=msg_info.get("cost", 0.0),
             finish=msg_info.get("finish"),
         ))
+
+    if session.session_tokens.total == 0:
+        session.session_tokens = aggregate_message_tokens(session.messages)
+
+    if session.session_cost == 0.0:
+        session.session_cost = sum(message.cost for message in session.messages)
 
     return session
 
