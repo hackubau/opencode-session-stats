@@ -161,3 +161,4 @@ Struttura per sessione:
 | Cost | `info.cost` |
 | Breakdown per messaggio | `messages[].info.tokens` |
 | Modello/provider | `info.model` |
+
